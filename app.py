@@ -6,10 +6,17 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
 from langchain.memory import ConversationBufferMemory
 from operator import itemgetter
+import glob
 
 # from langchain.chains import ConversationalRetrievalChain
-from langchain_core.messages import AIMessage, HumanMessage, get_buffer_string
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    get_buffer_string,
+    SystemMessage,
+)
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from string import Template
 
 # llm fr= OpenAI(temperature=0)
 from langchain.chains import (
@@ -21,7 +28,7 @@ from langchain.chains import (
 )
 
 from langchain.chains.combine_documents import create_stuff_documents_chain
-
+import json
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.document_loaders import AsyncChromiumLoader
 from langchain_community.document_transformers import BeautifulSoupTransformer
@@ -35,10 +42,16 @@ from langchain_core.runnables import (
     RunnableParallel,
 )
 from langchain.prompts.prompt import PromptTemplate
+from langchain_core.prompts.chat import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
+)
 
 import random
 import time
 
+chat = ChatOpenAI(temperature=0)
 # from sentence_transformers import SentenceTransformer
 # model = SentenceTransformer('intfloat/e5-large')
 
@@ -142,14 +155,62 @@ def get_response(retrieval_text):
 
 def typing_effect(message):
     for char in message:
-        st.write(char, end='', flush=True)
+        st.write(char, end="", flush=True)
         time.sleep(0.05)  # Adjust the sleep time as needed for desired typing speed
     st.write("")  # To move to the next line after typing completes
+
 
 # Streamed response emulator
 def response_generator(user_question):
     response = st.session_state.conversation({"question": user_question})
     st.write(response)
+
+
+def process_gpt(content, prompt):
+
+    messages = [
+        SystemMessage(content=prompt),
+        HumanMessage(content=content),
+    ]
+
+    return chat.invoke(messages)
+
+
+def extract_entities_relationships(folder, prompt_template):
+    files = glob.glob(f"./data/{folder}/*")
+    system_message = "You are a helpful IT-project and account management expert who extracts information from documents."
+    print(f"Running for pipeline for {len(files)} files in {folder} folder")
+    results = []
+    for i, file in enumerate(files):
+        try:
+            with open(file, "r") as f:
+                text = f.read().rstrip()
+                prompt = Template(prompt_template).substitute(ctext=text)
+                result = process_gpt(prompt, system_message)
+                results.append(json.loads(result))
+        except Exception as e:
+            print(f"Error processing file {file}: {e}")
+    return results
+
+def generate_cypher(json_object):
+    entities = []
+    relationships = []
+
+    for i,obj in enumerate(json_object):
+        for entity in obj['entities']:
+            label = entity['label']
+            Id = entity['id']
+            properties = {k:v for k,v in entity.items() if k not in ['label','id']}
+
+            cypher = f'MERGE (n: {label} {{id:"{Id}"}})'
+
+            if properties:
+                props_str = ','.join([f'n.{key} = "{val}"' for key,val in properties.items()])
+                cypher += f"ON CREATE SET {props_str}"
+            entities.append(cypher)
+        for rel in obj['relationships']:
+            start = rel['start']
+            end = rel['end']
 
 
 # Create the main function
@@ -178,7 +239,7 @@ def main():
             with st.spinner("Processing..."):
                 raw_text = get_pdf_text(pdfs)
                 text_chunks = get_chunks(raw_text)
-                if("vectorStore" not in st.session_state):
+                if "vectorStore" not in st.session_state:
                     st.session_state.vectorStore = get_vector_store(text_chunks)
 
         url = st.text_input("website url")
@@ -205,7 +266,6 @@ def main():
 
             st.session_state.chat_history.append(HumanMessage(content=prompt))
             st.session_state.chat_history.append(response)
-
 
         for message in st.session_state.chat_history:
             if isinstance(message, AIMessage):
