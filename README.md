@@ -1,47 +1,37 @@
 # Self-Reflective RAG Chatbot
 
-An advanced chatbot leveraging LangChain, GPT, and sophisticated retrieval techniques for dynamic interactions with PDF and web content. This project combines a Streamlit-based web application with a knowledge graph backend to create a powerful, context-aware chatbot.
+A Streamlit-based chatbot that uses advanced Retrieval-Augmented Generation (RAG) techniques, including self-reflection, query decomposition, and hierarchical indexing, to provide intelligent responses based on uploaded PDF documents.
 
 ## Features
 
-- **Self-Reflective RAG (Retrieval-Augmented Generation)**: Utilizes LangChain and GPT for intelligent, context-aware responses.
-- **PDF and Web Content Processing**: Extracts and processes information from uploaded PDFs and specified web URLs.
-- **Dynamic Conversation Chain**: Implements a conversational retrieval chain for maintaining context across interactions.
-- **Vector Store Integration**: Uses FAISS for efficient similarity search and retrieval.
-- **Streamlit Web Interface**: Provides an intuitive user interface for interacting with the chatbot.
-- **Knowledge Graph Backend**: Utilizes Neo4j for storing and querying complex relationships extracted from documents.
+- **PDF Document Processing**: Extract and process text from multiple PDF files.
+- **Hierarchical Indexing**: Utilize a two-level indexing system for more accurate information retrieval.
+- **Query Decomposition**: Break down complex queries into simpler sub-queries for comprehensive answers.
+- **Self-Reflection**: Analyze and reflect on the generated answers for improved accuracy and transparency.
+- **Streamlit User Interface**: Easy-to-use web interface for document uploading and chatting.
 
-## Project Structure
+## Prerequisites
 
-- `app.py`: Main Streamlit application file containing the chatbot interface and core logic.
-- `knowledge-graph.ipynb`: Jupyter notebook for knowledge graph operations and GPT processing.
+- Python 3.7+
+- OpenAI API key
 
 ## Installation
 
 1. Clone this repository:
    ```
-   git clone [repository-url]
-   cd [repository-name]
+   git clone https://github.com/yourusername/self-reflective-rag-chatbot.git
+   cd self-reflective-rag-chatbot
    ```
 
-2. Create and activate a virtual environment:
-   ```
-   python -m venv venv
-   source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-   ```
-
-3. Install the required dependencies:
+2. Install the required dependencies:
    ```
    pip install -r requirements.txt
    ```
 
-4. Set up environment variables:
-   Create a `.env` file in the project root and add the following:
+3. Set up your environment variables:
+   Create a `.env` file in the project root and add your OpenAI API key:
    ```
-   OPENAI_API_KEY=your_openai_api_key
-   NEO4J_CONNECTION_URI=your_neo4j_uri
-   NEO4J_USER=your_neo4j_username
-   NEO4J_PASSWORD=your_neo4j_password
+   OPENAI_API_KEY=your_openai_api_key_here
    ```
 
 ## Usage
@@ -51,34 +41,52 @@ An advanced chatbot leveraging LangChain, GPT, and sophisticated retrieval techn
    streamlit run app.py
    ```
 
-2. Upload PDF files or enter a website URL in the sidebar.
+2. Open your web browser and go to the URL provided by Streamlit (usually `http://localhost:8501`).
 
-3. Interact with the chatbot by typing your questions in the chat input.
+3. Use the sidebar to upload PDF documents and process them.
 
-## Dependencies
+4. Once the documents are processed, you can start chatting with the bot about the content of your documents in the main chat interface.
 
-- streamlit
-- python-dotenv
-- PyPDF2
-- langchain
-- openai
-- faiss-cpu
-- neo4j
-- beautifulsoup4
-- chromadb
+## How it Works
 
-## Configuration
+1. **Document Processing**: 
+   - The app extracts text from uploaded PDF files.
+   - The text is split into parent and child chunks using `RecursiveCharacterTextSplitter`.
 
-The project uses environment variables for configuration. Ensure you have set up the `.env` file with the necessary API keys and database credentials as mentioned in the Installation section.
+2. **Hierarchical Indexing**:
+   - Child chunks are embedded and stored in a FAISS vector store.
+   - Parent chunks are stored in an in-memory document store.
+   - A `ChildParentRetriever` is used to fetch relevant documents based on queries.
 
-## Development
+3. **Query Processing**:
+   - Complex queries are broken down into simpler sub-queries using an LLM.
+   - Each sub-query is processed separately, retrieving relevant context from the hierarchical index.
 
-To work on the knowledge graph component:
+4. **Answer Generation**:
+   - The LLM generates answers for each sub-query based on the retrieved context.
+   - Sub-answers are combined to form a comprehensive response.
 
-1. Open `knowledge-graph.ipynb` in Jupyter Notebook or JupyterLab.
-2. Ensure you have the required environment variables set.
-3. Run the cells to process documents and interact with the Neo4j database.
+5. **Self-Reflection**:
+   - The chatbot analyzes its own answer, considering factors like relevance, consistency, and completeness.
+   - A reflection is generated, providing insights into the answer's quality and potential areas for improvement.
+
+6. **User Interaction**:
+   - The Streamlit interface displays the chatbot's answer and allows users to view its self-reflection.
+   - The chat history is maintained for context in future queries.
+
+## Customization
+
+You can customize various aspects of the chatbot by modifying the following in `app.py`:
+- Chunk sizes and overlap in the `create_hierarchical_index` function
+- Prompt templates for query decomposition, answer generation, and self-reflection
+- LLM parameters (e.g., temperature) in the `ChatOpenAI` instances
+
+## Limitations
+
+- The chatbot's knowledge is limited to the content of the uploaded PDFs.
+- Processing large or numerous PDFs may take considerable time and computational resources.
+- The quality of responses depends on the OpenAI API and the specificity of the user's questions.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions to improve the chatbot are welcome. Please feel free to submit pull requests or open issues to discuss potential enhancements.
