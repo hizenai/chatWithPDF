@@ -47,15 +47,128 @@ from langchain_core.prompts.chat import (
     HumanMessagePromptTemplate,
     SystemMessagePromptTemplate,
 )
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import InMemoryDocstore
+from langchain.vectorstores import ChildParentRetriever
+
 
 import random
 import time
-
+load_dotenv()
 chat = ChatOpenAI(temperature=0)
 # from sentence_transformers import SentenceTransformer
 # model = SentenceTransformer('intfloat/e5-large')
 
 # Create the main function
+
+
+# 1. Hierarchical Indexing
+def create_hierarchical_index(raw_text):
+    # Create a hierarchical index with parent and child documents
+    parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+    child_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=50)
+
+    parent_documents = parent_splitter.split_documents(raw_text)
+    child_documents = child_splitter.split_documents(raw_text)
+
+    embeddings = OpenAIEmbeddings()
+    vector_store = FAISS.from_documents(child_documents, embeddings)
+    docstore = InMemoryDocstore({})
+
+    retriever = ChildParentRetriever(
+        vectorstore=vector_store,
+        docstore=docstore,
+        child_splitter=child_splitter,
+        parent_splitter=parent_splitter,
+    )
+
+    return retriever
+
+
+# 2. Query Decomposition
+def decompose_query(query):
+    llm = ChatOpenAI(temperature=0)
+    decomposition_template = """
+    Break down the following complex query into simpler sub-queries:
+    Query: {query}
+    
+    Output the sub-queries as a Python list.
+    """
+    decomposition_prompt = PromptTemplate(
+        template=decomposition_template, input_variables=["query"]
+    )
+    decomposition_chain = LLMChain(llm=llm, prompt=decomposition_prompt)
+
+    sub_queries = decomposition_chain.run(query)
+    return eval(sub_queries)  # Convert string representation of list to actual list
+
+
+# 3. Self-Reflection
+def self_reflect(query, context, answer):
+    llm = ChatOpenAI(temperature=0)
+    reflection_template = """
+    Analyze the following question, context, and answer:
+    
+    Question: {query}
+    Context: {context}
+    Answer: {answer}
+    
+    Reflect on the following:
+    1. Is the answer directly addressing the question?
+    2. Is the answer supported by the given context?
+    3. Are there any logical inconsistencies in the answer?
+    4. What additional information might be needed to provide a more comprehensive answer?
+    
+    Provide your reflection and any suggestions for improvement.
+    """
+    reflection_prompt = PromptTemplate(
+        template=reflection_template, input_variables=["query", "context", "answer"]
+    )
+    reflection_chain = LLMChain(llm=llm, prompt=reflection_prompt)
+
+    reflection = reflection_chain.run(query=query, context=context, answer=answer)
+    return reflection
+
+
+# 4. Enhanced Conversation Chain
+def get_enhanced_conversation_chain(retriever):
+    llm = ChatOpenAI(temperature=0)
+
+    qa_template = """
+    Answer the following question based on the given context:
+    
+    Context: {context}
+    Question: {question}
+    
+    If you cannot answer the question based on the context, say "I don't have enough information to answer this question."
+    
+    Answer:
+    """
+    qa_prompt = PromptTemplate(
+        template=qa_template, input_variables=["context", "question"]
+    )
+    qa_chain = LLMChain(llm=llm, prompt=qa_prompt)
+
+    def process_query(query):
+        sub_queries = decompose_query(query)
+        contexts = []
+        answers = []
+
+        for sub_query in sub_queries:
+            relevant_docs = retriever.get_relevant_documents(sub_query)
+            context = "\n".join([doc.page_content for doc in relevant_docs])
+            answer = qa_chain.run(context=context, question=sub_query)
+            contexts.append(context)
+            answers.append(answer)
+
+        combined_context = "\n".join(contexts)
+        combined_answer = "\n".join(answers)
+
+        reflection = self_reflect(query, combined_context, combined_answer)
+
+        return {"answer": combined_answer, "reflection": reflection}
+
+    return process_query
 
 
 def get_pdf_text(pdfs):
@@ -192,89 +305,142 @@ def extract_entities_relationships(folder, prompt_template):
             print(f"Error processing file {file}: {e}")
     return results
 
+
 def generate_cypher(json_object):
     entities = []
     relationships = []
 
-    for i,obj in enumerate(json_object):
-        for entity in obj['entities']:
-            label = entity['label']
-            Id = entity['id']
-            properties = {k:v for k,v in entity.items() if k not in ['label','id']}
+    for i, obj in enumerate(json_object):
+        for entity in obj["entities"]:
+            label = entity["label"]
+            Id = entity["id"]
+            properties = {k: v for k, v in entity.items() if k not in ["label", "id"]}
 
             cypher = f'MERGE (n: {label} {{id:"{Id}"}})'
 
             if properties:
-                props_str = ','.join([f'n.{key} = "{val}"' for key,val in properties.items()])
+                props_str = ",".join(
+                    [f'n.{key} = "{val}"' for key, val in properties.items()]
+                )
                 cypher += f"ON CREATE SET {props_str}"
             entities.append(cypher)
-        for rel in obj['relationships']:
-            start = rel['start']
-            end = rel['end']
+        for rel in obj["relationships"]:
+            start = rel["start"]
+            end = rel["end"]
 
 
 # Create the main function
+# def main():
+
+#     st.set_page_config(page_title="Chat with PDF", page_icon="📚")
+
+#     if "chat_history" not in st.session_state:
+#         st.session_state.chat_history = [
+#             AIMessage(content="Hello How Can I Help You?"),
+#             HumanMessage(content=""),
+#         ]
+#     # good practice
+
+#     if "conversation" not in st.session_state:
+#         st.session_state.conversation = None
+
+#     st.title("Chat with PDF")
+#     with st.sidebar:
+#         st.subheader("PDF file")
+#         st.write("This is the PDF file that you are chatting with.")
+#         pdfs = st.file_uploader(
+#             "Upload a PDF file", type="pdf", accept_multiple_files=True
+#         )
+#         if st.button("Process"):
+#             with st.spinner("Processing..."):
+#                 raw_text = get_pdf_text(pdfs)
+#                 text_chunks = get_chunks(raw_text)
+#                 if "vectorStore" not in st.session_state:
+#                     st.session_state.vectorStore = get_vector_store(text_chunks)
+
+#         url = st.text_input("website url")
+
+#     if url is not None and url != "":
+#         st.info("Please enter a url")
+
+#     else:
+#         # documents = get_vector_store_from_url(url)
+#         # with st.sidebar:
+#         #     st.write(documents)
+#         # Accept user input
+#         if prompt := st.chat_input("What is up?"):
+#             conversation = get_conversation_chain(st.session_state.vectorStore)
+
+#             retrieved_texts = conversation.invoke(
+#                 {
+#                     "question": prompt,
+#                     "chat_history": st.session_state.chat_history,
+#                 }
+#             )
+
+#             response = get_response(retrieved_texts)
+
+#             st.session_state.chat_history.append(HumanMessage(content=prompt))
+#             st.session_state.chat_history.append(response)
+
+#         for message in st.session_state.chat_history:
+#             if isinstance(message, AIMessage):
+#                 st.chat_message("AI")
+#                 st.write(message.content)
+#             elif isinstance(message, HumanMessage):
+#                 st.chat_message("Human")
+#                 st.write(message.content)
+
+# Streamlit App
 def main():
-    load_dotenv()
-    st.set_page_config(page_title="Chat with PDF", page_icon="📚")
+
+    st.set_page_config(page_title="Self-Reflective RAG Chatbot", page_icon="🤖")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = [
-            AIMessage(content="Hello How Can I Help You?"),
+            AIMessage(content="Hello! How can I help you today?"),
             HumanMessage(content=""),
         ]
-    # good practice
 
-    if "conversation" not in st.session_state:
-        st.session_state.conversation = None
+    if "retriever" not in st.session_state:
+        st.session_state.retriever = None
 
-    st.title("Chat with PDF")
+    st.title("Self-Reflective RAG Chatbot")
+    
     with st.sidebar:
-        st.subheader("PDF file")
-        st.write("This is the PDF file that you are chatting with.")
-        pdfs = st.file_uploader(
-            "Upload a PDF file", type="pdf", accept_multiple_files=True
-        )
-        if st.button("Process"):
-            with st.spinner("Processing..."):
+        st.subheader("Upload Documents")
+        pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
+        if st.button("Process Documents"):
+            with st.spinner("Processing documents..."):
                 raw_text = get_pdf_text(pdfs)
-                text_chunks = get_chunks(raw_text)
-                if "vectorStore" not in st.session_state:
-                    st.session_state.vectorStore = get_vector_store(text_chunks)
+                st.session_state.retriever = create_hierarchical_index(raw_text)
+                st.success("Documents processed successfully!")
 
-        url = st.text_input("website url")
-
-    if url is not None and url != "":
-        st.info("Please enter a url")
-
+    if st.session_state.retriever is None:
+        st.info("Please upload and process documents to start chatting.")
     else:
-        # documents = get_vector_store_from_url(url)
-        # with st.sidebar:
-        #     st.write(documents)
-        # Accept user input
-        if prompt := st.chat_input("What is up?"):
-            conversation = get_conversation_chain(st.session_state.vectorStore)
-
-            retrieved_texts = conversation.invoke(
-                {
-                    "question": prompt,
-                    "chat_history": st.session_state.chat_history,
-                }
-            )
-
-            response = get_response(retrieved_texts)
-
+        if prompt := st.chat_input("Ask a question about the uploaded documents"):
             st.session_state.chat_history.append(HumanMessage(content=prompt))
-            st.session_state.chat_history.append(response)
 
+            conversation = get_enhanced_conversation_chain(st.session_state.retriever)
+            
+            with st.spinner("Thinking..."):
+                response = conversation(prompt)
+            
+            st.session_state.chat_history.append(AIMessage(content=response["answer"]))
+            st.subheader("AI Response:")
+            st.write(response["answer"])
+            
+            with st.expander("View AI's Self-Reflection"):
+                st.write(response["reflection"])
+
+        # Display chat history
         for message in st.session_state.chat_history:
             if isinstance(message, AIMessage):
-                st.chat_message("AI")
-                st.write(message.content)
+                st.chat_message("AI").write(message.content)
             elif isinstance(message, HumanMessage):
-                st.chat_message("Human")
-                st.write(message.content)
-
+                st.chat_message("Human").write(message.content)
 
 if __name__ == "__main__":
     main()
+
